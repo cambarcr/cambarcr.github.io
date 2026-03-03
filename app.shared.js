@@ -79,6 +79,10 @@
 
     if (!track || !thumbs || !counter) return;
 
+    let activeIndex = 0;
+    let scrollSyncLockUntil = 0;
+    let modalLoadToken = 0;
+
     // Render slides
     track.innerHTML = photos.map((p, i) => `
       <div class="ac-gallery__slide">
@@ -106,13 +110,38 @@
       </button>
     `).join("");
 
+    function setModalImage(i) {
+      if (!modalImg) return;
+      const src = photos[i]?.src || photos[0]?.src || "";
+      if (!src || modalImg.dataset.src === src) return;
+
+      const token = ++modalLoadToken;
+      const apply = () => {
+        if (token !== modalLoadToken) return;
+        modalImg.src = src;
+        modalImg.dataset.src = src;
+      };
+
+      const preload = new Image();
+      preload.decoding = "async";
+      preload.src = src;
+      if (typeof preload.decode === "function") preload.decode().then(apply).catch(apply);
+      else {
+        preload.onload = apply;
+        preload.onerror = apply;
+      }
+    }
+
     function setActive(i) {
-      counter.textContent = `Foto ${i + 1} de ${photos.length}`;
+      const idx = Math.max(0, Math.min(photos.length - 1, Number(i) || 0));
+      activeIndex = idx;
+
+      counter.textContent = `Foto ${idx + 1} de ${photos.length}`;
       [...thumbs.querySelectorAll(".ac-thumb")].forEach((b) => {
-        b.classList.toggle("is-active", Number(b.dataset.idx) === i);
+        b.classList.toggle("is-active", Number(b.dataset.idx) === idx);
       });
-      if (modalCounter) modalCounter.textContent = `Foto ${i + 1} de ${photos.length}`;
-      if (modalImg) modalImg.src = photos[i]?.src || photos[0].src;
+      if (modalCounter) modalCounter.textContent = `Foto ${idx + 1} de ${photos.length}`;
+      setModalImage(idx);
     }
 
     // Thumb click
@@ -120,6 +149,7 @@
       const btn = e.target.closest(".ac-thumb");
       if (!btn) return;
       const idx = Number(btn.dataset.idx || 0);
+      scrollSyncLockUntil = performance.now() + 360;
       scrollToIndex(track, idx, true);
       setActive(idx);
     });
@@ -129,6 +159,7 @@
     track.addEventListener("scroll", () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
+        if (performance.now() < scrollSyncLockUntil) return;
         const idx = getActiveIndex(track);
         setActive(idx);
       });
@@ -155,9 +186,14 @@
     const prev = document.getElementById("btnPrev");
     const next = document.getElementById("btnNext");
     function step(delta) {
-      const current = getActiveIndex(track);
-      const target = Math.max(0, Math.min(photos.length - 1, current + delta));
-      scrollToIndex(track, target, true);
+      const target = Math.max(0, Math.min(photos.length - 1, activeIndex + delta));
+      if (target === activeIndex) return;
+
+      // En fullscreen evitamos el "smooth" para no provocar cambios intermedios que parpadeen.
+      const isModalOpen = Boolean(modalEl?.classList.contains("show"));
+      const smooth = !isModalOpen;
+      if (smooth) scrollSyncLockUntil = performance.now() + 360;
+      scrollToIndex(track, target, smooth);
       setActive(target);
     }
     prev?.addEventListener("click", () => step(-1));
